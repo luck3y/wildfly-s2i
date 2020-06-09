@@ -24,17 +24,8 @@ jobs:
         if: env.QUAY_USERNAME == '' || env.QUAY_REPO == ''
         run: |
           echo "quay.io configuration is incomplete, push to quay.io will be skipped. If you wish to push built images to quay.io, please ensure the secrets QUAY_REPO, QUAY_USERNAME and QUAY_PASSWORD are created in the project."
-      - name: Get PR ID
-        uses: actions/github-script@0.3.0
-        with:
-          github-token: ${{github.token}}
-          script: |
-            const core = require('@actions/core')
-            const prNumber = context.payload.number;
-            core.exportVariable('PULL_NUMBER', prNumber); 
       - name: Setup required system packages
         run: |
-          echo PULL NUMBER: ${PULL_NUMBER}
           sudo apt-get update
           sudo apt-get install krb5-multidev
       - name: Setup virtualenv and install cekit and required packages
@@ -65,10 +56,10 @@ jobs:
       - name: Push to quay.io
         if: env.QUAY_USERNAME != '' && env.QUAY_REPO != ''
         run: |
-            BUILDER_IMAGE="quay.io/${{ secrets.QUAY_REPO }}/wildfly-centos7:${PULL_NUMBER}"
-            RUNTIME_IMAGE="quay.io/${{ secrets.QUAY_REPO }}/wildfly-runtime-centos7:${PULL_NUMBER}"
+            BUILDER_IMAGE="quay.io/${{ secrets.QUAY_REPO }}/wildfly-centos7:latest"
+            RUNTIME_IMAGE="quay.io/${{ secrets.QUAY_REPO }}/wildfly-runtime-centos7:latest"
             echo QUAY_REPO: "${{ secrets.QUAY_REPO }}"
-            echo Pushing to quay.io with the tag :${PULL_NUMBER}
+            echo Pushing to quay.io with the tag :latest
             echo BUILDER_IMAGE: ${BUILDER_IMAGE}
             echo RUNTIME_IMAGE: ${RUNTIME_IMAGE}
             docker login -u="${{ secrets.QUAY_USERNAME }}" -p="${{ secrets.QUAY_PASSWORD }}" quay.io
