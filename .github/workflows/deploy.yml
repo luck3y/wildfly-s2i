@@ -8,7 +8,7 @@ env:
   QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
 jobs:
   wfci:
-    name: Wildfly-s2i Build and Test
+    name: Wildfly-s2i Build, Test and Deploy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
