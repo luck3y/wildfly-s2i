@@ -6,11 +6,30 @@ env:
   CEKIT_VERSION: 3.2.1
   QUAY_REPO: ${{ secrets.QUAY_REPO }}
   QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+  REPO: wildfly/wildfly-s2i
+  REF: master
+  NAMESPACE: wildfly
+  PLATFORM: centos7
+  IMAGE_NAME: wildfly-${PLATFORM}
+  RUNTIME_IMAGE_NAME: wildfly-runtime-${PLATFORM}
+  IMAGE_TAG: latest
 jobs:
   wfci:
     name: Wildfly-s2i Build, Test and Deploy
     runs-on: ubuntu-latest
     steps:
+      - name: Extract payload variables
+        uses: actions/github-script@0.3.0
+        with:
+          github-token: ${{github.token}}
+          script: |
+            const core = require('@actions/core')
+            const repo = context.payload.repo
+            core.exportVariable('REPO', repo)
+            const ref = context.payload.ref
+            core.exportVariable('REF', ref)
+            const img_tag = context.payload.image_tag
+            core.exportVariable('IMAGE_TAG', img_tag)
       - uses: actions/checkout@v2
       - uses: n1hility/cancel-previous-runs@v2
         with:
@@ -63,30 +82,25 @@ jobs:
         run: |
           . ~/cekit${{ env.CEKIT_VERSION }}/bin/activate
           pushd wildfly-builder-image
-          cekit -v test behave --steps-url https://github.com/luck3y/behave-test-steps.git
+          cekit -v test behave
           popd
       - name: Additional Tests
         run: |
-          export IMAGE_VERSION=dev
-          export NAMESPACE=wildfly
-          export PLATFORM=centos7
-          export IMAGE_NAME=${NAMESPACE}/wildfly-${PLATFORM}
-          export RUNTIME_IMAGE_NAME=${NAMESPACE}/wildfly-runtime-${PLATFORM}
           . ~/cekit${{ env.CEKIT_VERSION }}/bin/activate
           ./test/run
       - name: Push to quay.io
         if: env.QUAY_USERNAME != '' && env.QUAY_REPO != ''
         run: |
-            BUILDER_IMAGE="quay.io/${{ secrets.QUAY_REPO }}/wildfly-centos7:latest"
-            RUNTIME_IMAGE="quay.io/${{ secrets.QUAY_REPO }}/wildfly-runtime-centos7:latest"
             echo QUAY_REPO: "${{ secrets.QUAY_REPO }}"
-            echo Pushing to quay.io with the tag :latest
-            echo BUILDER_IMAGE: ${BUILDER_IMAGE}
-            echo RUNTIME_IMAGE: ${RUNTIME_IMAGE}
+            echo BUILDER_IMAGE: ${{ env.IMAGE_NAME }}
+            echo RUNTIME_IMAGE: ${{ env.RUNTIME_IMAGE_NAME }}
+            echo Pushing to quay.io with the tag ${{ env.IMAGE_TAG }}
+            BUILDER_IMAGE="quay.io/${{ secrets.QUAY_REPO }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+            RUNTIME_IMAGE="quay.io/${{ secrets.QUAY_REPO }}/${{ env.RUNTIME_IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
             docker login -u="${{ secrets.QUAY_USERNAME }}" -p="${{ secrets.QUAY_PASSWORD }}" quay.io
-            docker tag wildfly/wildfly-centos7:latest ${BUILDER_IMAGE}
+            docker tag ${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${BUILDER_IMAGE}
             docker push ${BUILDER_IMAGE}
-            docker tag wildfly/wildfly-runtime-centos7:latest ${RUNTIME_IMAGE}
+            docker tag ${{ env.NAMESPACE }}/${{ env.RUNTIME_IMAGE_NAME}}:${{ env.IMAGE_TAG}} ${RUNTIME_IMAGE}
             docker push ${RUNTIME_IMAGE}
       - name: 'deployment success'
         if: success()
