@@ -10,9 +10,10 @@ env:
   CEKIT_VERSION: 3.2.1
   QUAY_REPO: ${{ secrets.QUAY_REPO }}
   QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+  TEST_RUNNERS: 5
 jobs:
-  wfci:
-    name: Wildfly-s2i Build and Test
+  wfci-build:
+    name: Wildfly-s2i Build
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -74,7 +75,12 @@ jobs:
         run: |
           . ~/cekit${{ env.CEKIT_VERSION }}/bin/activate
           make
-          docker image ls
+          docker save wildfly/wildfly-centos7:latest -o wildfly-centos7
+      - name: Save Artifacts
+        uses: actions/upload-artifact@v1
+        with:
+          name: wildfly-centos7
+          path: wildfly-centos7
       - name: Push to quay.io
         if: env.QUAY_USERNAME != '' && env.QUAY_REPO != ''
         run: |
@@ -89,18 +95,84 @@ jobs:
             docker push ${BUILDER_IMAGE}
             docker tag wildfly/wildfly-runtime-centos7:latest ${RUNTIME_IMAGE}
             docker push ${RUNTIME_IMAGE}
-      - name: Behave Tests
+
+  wfci-test:
+    name: Run Tests
+    needs: wfci-build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        runner: [1, 2, 3, 4, 5]
+    steps:
+      - name: Download Built Docker Image
+        uses: actions/download-artifact@v1
+        with:
+          name: wildfly-centos7
+          path: .
+      - name: Load Docker Image
+        shell: bash
+        run: |
+          docker load < wildfly-centos7
+      - uses: actions/checkout@v2
+      - name: Setup required system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install krb5-multidev
+      - name: Setup Python 3.x
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.x'
+      - name: Setup virtualenv and install cekit and required packages
+        run: |
+          python --version
+          sudo pip install virtualenv
+          mkdir ~/cekit${{ env.CEKIT_VERSION }}
+          python3 -m venv ~/cekit${{ env.CEKIT_VERSION }}
+          . ~/cekit${{ env.CEKIT_VERSION }}/bin/activate
+          pip install cekit==${{ env.CEKIT_VERSION }} docker docker-squash odcs behave lxml 
+      - name: install s2i binary
+        run: |
+          echo ===== Installing s2i from ${{ env.S2I_URL }} =====
+          mkdir /tmp/s2i/ && cd /tmp/s2i/
+          curl -s ${{ env.S2I_URI }} \
+           | grep browser_download_url \
+           | grep linux-amd64 \
+           | cut -d '"' -f 4 \
+           | wget -qi -
+           tar xvf source-to-image*.gz
+           sudo mv s2i /usr/bin
+           which s2i
+           s2i version
+      - name: Build Test List
         run: |
           . ~/cekit${{ env.CEKIT_VERSION }}/bin/activate
-          pushd wildfly-builder-image
-          cekit -v test behave --steps-url https://github.com/luck3y/behave-test-steps.git
-          popd
-      - name: Additional Tests
+          cd wildfly-builder-image
+          # note this is a fake invocation to populate the test directories
+          cekit -v test behave --name "POPULATE TESTS FROM MODULE REPOS"
+          for i in `find target/test/features/ -name "*.feature"`; do echo $i; done | xargs grep 'Scenario' | awk -F'Scenario:' '{print $2}' > tests.list
+          split -a 1 -n 5 --numeric-suffixes=1 tests.list tests-
+          rm tests.list
+      - name: Behave Tests - Runner ${{ matrix.runner }}
         run: |
-          export IMAGE_VERSION=dev
-          export NAMESPACE=wildfly
-          export PLATFORM=centos7
-          export IMAGE_NAME=${NAMESPACE}/wildfly-${PLATFORM}
-          export RUNTIME_IMAGE_NAME=${NAMESPACE}/wildfly-runtime-${PLATFORM}
+          cd wildfly-builder-image
+          ls -l 
+          echo This is runner: ${{ matrix.runner }}
+          export TESTFILE=tests-${{ matrix.runner }}
+          cat ${TESTFILE}
+          TEST_LIST_ARGS=$(while IFS= read -r i; do echo -n " --name \'${i##*( )}\' "; done < ${TESTFILE})
+          echo "Test Additional Args: " ${TEST_LIST_ARGS}
           . ~/cekit${{ env.CEKIT_VERSION }}/bin/activate
-          ./test/run
+          cekit -v test behave ${TEST_LIST_ARGS}
+          #popd
+          ls -l
+      # - name: Additional Tests
+      #   run: |
+      #     export IMAGE_VERSION=dev
+      #     export NAMESPACE=wildfly
+      #     export PLATFORM=centos7
+      #     export IMAGE_NAME=${NAMESPACE}/wildfly-${PLATFORM}
+      #     export RUNTIME_IMAGE_NAME=${NAMESPACE}/wildfly-runtime-${PLATFORM}
+      #     . ~/cekit${{ env.CEKIT_VERSION }}/bin/activate
+      #     ./test/run
